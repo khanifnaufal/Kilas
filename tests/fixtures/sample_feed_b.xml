@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  sample_feed_b.xml — Feed fixture dengan 3 artikel (uji partial failure).
+  Digunakan ketika sebagian feed gagal; feed ini tetap harus menghasilkan item.
+-->
+<rss version="2.0">
+  <channel>
+    <title>Sample Feed B — Ekonomi</title>
+    <link>https://example.com/ekonomi</link>
+    <description>Feed ekonomi untuk pengujian partial failure</description>
+
+    <item>
+      <title>Ekonomi B: Inflasi Menurun di Kuartal Ini</title>
+      <link>https://example.com/b/1</link>
+      <description>Laju inflasi Indonesia menurun signifikan.</description>
+      <pubDate>Sat, 07 Nov 2026 11:00:00 +0000</pubDate>
+    </item>
+
+    <item>
+      <title>Ekonomi B: Ekspor Nonmigas Meningkat</title>
+      <link>https://example.com/b/2</link>
+      <description>Nilai ekspor nonmigas naik 12 persen.</description>
+      <pubDate>Sat, 07 Nov 2026 10:30:00 +0000</pubDate>
+    </item>
+
+    <item>
+      <title>Ekonomi B: IHSG Ditutup Menguat</title>
+      <link>https://example.com/b/3</link>
+      <description>Indeks Harga Saham Gabungan menguat 0.8 persen.</description>
+      <pubDate>Sat, 07 Nov 2026 09:30:00 +0000</pubDate>
+    </item>
+
+  </channel>
+</rss>
+

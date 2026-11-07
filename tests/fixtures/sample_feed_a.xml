@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  sample_feed_a.xml — Feed fixture dengan 7 artikel (uji top-5 & sorting).
+  Timestamps sengaja TIDAK berurutan agar fungsi sort bisa diverifikasi.
+-->
+<rss version="2.0">
+  <channel>
+    <title>Sample Feed A — Teknologi</title>
+    <link>https://example.com/teknologi</link>
+    <description>Feed teknologi untuk pengujian unit test</description>
+
+    <!-- Artikel ke-3 terbaru: 08:00 UTC -->
+    <item>
+      <title>Artikel Ketiga Terbaru: Inovasi AI di Indonesia</title>
+      <link>https://example.com/artikel/3</link>
+      <description>&lt;p&gt;Deskripsi &lt;b&gt;dengan HTML&lt;/b&gt; yang perlu dibersihkan &amp; diunescape.&lt;/p&gt;</description>
+      <pubDate>Sat, 07 Nov 2026 08:00:00 +0000</pubDate>
+    </item>
+
+    <!-- Artikel paling lama ke-7: 04:00 UTC — seharusnya tidak masuk top-5 -->
+    <item>
+      <title>Artikel Paling Lama: Komputer Pertama di Dunia</title>
+      <link>https://example.com/artikel/7</link>
+      <description>Deskripsi artikel paling lama</description>
+      <pubDate>Sat, 07 Nov 2026 04:00:00 +0000</pubDate>
+    </item>
+
+    <!-- Artikel paling baru ke-1: 10:00 UTC -->
+    <item>
+      <title>Artikel Paling Baru: Peluncuran Satelit Nasional</title>
+      <link>https://example.com/artikel/1</link>
+      <description>Deskripsi artikel paling baru</description>
+      <pubDate>Sat, 07 Nov 2026 10:00:00 +0000</pubDate>
+    </item>
+
+    <!-- Artikel ke-5 terbaru: 06:00 UTC — batas top-5 -->
+    <item>
+      <title>Artikel Kelima: Startup Teknologi Raih Pendanaan</title>
+      <link>https://example.com/artikel/5</link>
+      <description>Deskripsi artikel kelima</description>
+      <pubDate>Sat, 07 Nov 2026 06:00:00 +0000</pubDate>
+    </item>
+
+    <!-- Artikel ke-2 terbaru: 09:00 UTC -->
+    <item>
+      <title>Artikel Kedua: Pembaruan Sistem Operasi Terbaru</title>
+      <link>https://example.com/artikel/2</link>
+      <description>Deskripsi artikel kedua</description>
+      <pubDate>Sat, 07 Nov 2026 09:00:00 +0000</pubDate>
+    </item>
+
+    <!-- Artikel ke-6 terlama: 05:00 UTC — seharusnya tidak masuk top-5 -->
+    <item>
+      <title>Artikel Keenam: Sejarah Internet di Indonesia</title>
+      <link>https://example.com/artikel/6</link>
+      <description>Deskripsi artikel keenam</description>
+      <pubDate>Sat, 07 Nov 2026 05:00:00 +0000</pubDate>
+    </item>
+
+    <!-- Artikel ke-4 terbaru: 07:00 UTC -->
+    <item>
+      <title>Artikel Keempat: Perkembangan 5G di Kota Besar</title>
+      <link>https://example.com/artikel/4</link>
+      <description>Deskripsi artikel keempat</description>
+      <pubDate>Sat, 07 Nov 2026 07:00:00 +0000</pubDate>
+    </item>
+
+  </channel>
+</rss>
+

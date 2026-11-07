@@ -11,7 +11,7 @@ from telegram import Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler
 
 from .config import TELEGRAM_TOKEN
-from .handlers import cb_genre, cmd_start
+from .handlers import cb_article, cb_genre, cmd_start
 
 
 def _setup_logging() -> None:
@@ -33,7 +33,6 @@ def main() -> None:
 
     logger.info("🚀 Kilas Bot sedang dimulai...")
 
-    # Bangun aplikasi Telegram
     app = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
@@ -42,7 +41,9 @@ def main() -> None:
 
     # --- Daftarkan handler ---
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CallbackQueryHandler(cb_genre, pattern=r"^genre_"))
+    # Urutan penting: pattern lebih spesifik didaftarkan lebih dulu
+    app.add_handler(CallbackQueryHandler(cb_genre,   pattern=r"^genre_"))
+    app.add_handler(CallbackQueryHandler(cb_article, pattern=r"^art_"))
 
     logger.info("✅ Bot siap. Tekan Ctrl+C untuk berhenti.")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
@@ -50,3 +51,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
