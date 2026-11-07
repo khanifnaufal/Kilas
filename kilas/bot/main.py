@@ -11,7 +11,7 @@ from telegram import Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler
 
 from .config import TELEGRAM_TOKEN
-from .handlers import cb_article, cb_genre, cmd_start
+from .handlers import cb_article, cb_back_genres, cb_genre, cmd_start
 
 
 def _setup_logging() -> None:
@@ -41,9 +41,10 @@ def main() -> None:
 
     # --- Daftarkan handler ---
     app.add_handler(CommandHandler("start", cmd_start))
-    # Urutan penting: pattern lebih spesifik didaftarkan lebih dulu
-    app.add_handler(CallbackQueryHandler(cb_genre,   pattern=r"^genre_"))
+    # Urutan pattern callback
+    app.add_handler(CallbackQueryHandler(cb_genre, pattern=r"^genre_"))
     app.add_handler(CallbackQueryHandler(cb_article, pattern=r"^art_"))
+    app.add_handler(CallbackQueryHandler(cb_back_genres, pattern=r"^back_genres$"))
 
     logger.info("✅ Bot siap. Tekan Ctrl+C untuk berhenti.")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
@@ -51,4 +52,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -123,7 +123,7 @@ async def _fetch_one_feed(source: str, url: str) -> list[NewsItem]:
         # 'summary' adalah field standar, 'description' adalah alias lama
         raw_desc = entry.get("summary", entry.get("description", ""))
         desc = _strip_html(raw_desc)[:300]  # batasi deskripsi 300 karakter
-        link = entry.get("link", "")
+        link = entry.get("link", "").strip()
 
         items.append(NewsItem(
             title=title,
