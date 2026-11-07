@@ -1,0 +1,27 @@
+# ============================================================
+# Kilas Bot — Pinned Dependencies
+# Install: pip install -r requirements.txt
+# Python: 3.11+
+# ============================================================
+
+# --- Telegram ---
+python-telegram-bot==21.6
+
+# --- Config ---
+python-dotenv==1.0.1
+
+# --- RSS & Content (Fase 2+) ---
+feedparser==6.0.11
+trafilatura==1.12.1
+
+# --- Scheduler (Fase 3+) ---
+APScheduler==3.10.4
+
+# --- LLM Providers (Fase 2+) ---
+groq==0.9.0
+google-generativeai==0.7.2
+anthropic==0.34.2
+
+# --- HTTP ---
+httpx==0.27.2
+requests==2.32.3
