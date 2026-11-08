@@ -5,6 +5,7 @@ Menguji:
 - Inisialisasi tabel SQLite (users, subscriptions, summaries_cache).
 - Preferensi gaya user (default 'standar', get, dan set).
 - Cache ringkasan (cache hit, cache miss, pembaruan, dan composite PK url+style).
+- Langganan digest harian (get, set, delete, dan get_all).
 """
 
 import os
@@ -13,12 +14,16 @@ import unittest
 
 from kilas.bot.db import (
     DEFAULT_STYLE,
+    delete_user_subscription,
+    get_all_subscriptions,
     get_cached_summary,
     get_db,
     get_user_style,
+    get_user_subscription,
     init_db,
     set_cached_summary,
     set_user_style,
+    set_user_subscription,
 )
 
 
@@ -113,6 +118,37 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(
             get_cached_summary(url, "standar", db_path=self.db_path), "Ringkasan baru"
         )
+
+    # --- Pengujian Langganan Digest (Fase 5) ---
+
+    def test_subscription_lifecycle(self):
+        """Uji get, set, delete, dan get_all langganan digest."""
+        user_id = 12345
+        # 1. Sebelum berlangganan harus None
+        self.assertIsNone(get_user_subscription(user_id, db_path=self.db_path))
+
+        # 2. Set langganan baru
+        set_user_subscription(user_id, "genre_teknologi", "07:00", db_path=self.db_path)
+        sub = get_user_subscription(user_id, db_path=self.db_path)
+        self.assertIsNotNone(sub)
+        self.assertEqual(sub["genre"], "genre_teknologi")
+        self.assertEqual(sub["send_time"], "07:00")
+
+        # 3. Update langganan (ganti jam dan genre)
+        set_user_subscription(user_id, "genre_ekonomi", "18:00", db_path=self.db_path)
+        sub_updated = get_user_subscription(user_id, db_path=self.db_path)
+        self.assertEqual(sub_updated["genre"], "genre_ekonomi")
+        self.assertEqual(sub_updated["send_time"], "18:00")
+
+        # 4. get_all_subscriptions
+        all_subs = get_all_subscriptions(db_path=self.db_path)
+        self.assertEqual(len(all_subs), 1)
+        self.assertEqual(all_subs[0]["telegram_id"], user_id)
+
+        # 5. Delete langganan
+        delete_user_subscription(user_id, db_path=self.db_path)
+        self.assertIsNone(get_user_subscription(user_id, db_path=self.db_path))
+        self.assertEqual(len(get_all_subscriptions(db_path=self.db_path)), 0)
 
 
 if __name__ == "__main__":

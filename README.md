@@ -74,8 +74,14 @@ python -m kilas.bot.main
   - **⚡ Singkat**: 1 kalimat padat dan informatif.
   - **📌 Standar**: 3 poin penting (default).
   - **📖 Detail**: 1 paragraf pendek komprehensif.
+- **/digest**: Langganan pengiriman digest harian otomatis:
+  - Pilih genre favorit dan jam pengiriman (06:00, 07:00, 08:00, 12:00, 18:00, 20:00 WIB).
+  - Dikirim sebagai satu pesan rapi berisi top 5 berita sesuai gaya ringkasan kamu.
+  - Dapat diubah jadwalnya atau dimatikan kapan saja tanpa restart bot.
 - **🎨 Ganti Gaya Interaktif**: Tombol `[🎨 Ganti gaya]` langsung pada pesan berita untuk meringkas ulang artikel dengan gaya lain.
-- **⚡ SQLite Caching**: Ringkasan yang sudah pernah di-generate disimpan ke SQLite. Artikel dan gaya yang sama langsung dimuat instan tanpa memanggil ulang LLM.
+- **⚡ SQLite Caching**: Ringkasan yang sudah pernah dibuat disimpan ke SQLite, mempercepat respons dan menghemat kuota LLM.
+- **🛡️ Rate Limiter**: Membatasi maksimal 10 permintaan ringkasan per menit per user untuk mencegah spam dan over-quota.
+- **🔒 Error Handling Global**: Menjaga bot tetap berjalan jika terjadi error jaringan, formatting Markdown, atau ketika user memblokir bot (langganan otomatis dinonaktifkan).
 
 ---
 
@@ -100,13 +106,15 @@ python -m kilas.bot.main
 Kilas/
 ├── kilas/
 │   └── bot/
-│       ├── main.py         # Entry point — inisialisasi DB & jalankan bot
+│       ├── main.py         # Entry point — inisialisasi DB, scheduler, & handler bot
 │       ├── config.py       # Load & validasi .env
 │       ├── db.py           # SQLite: users, subscriptions, summaries_cache
 │       ├── feeds.py        # Mapping sumber RSS per genre
 │       ├── rss.py          # Fetch & parse feed RSS secara async
 │       ├── extractor.py    # Ekstraksi full-text artikel via trafilatura
 │       ├── summarizer.py   # LLM summarizer (3 gaya: Singkat, Standar, Detail)
+│       ├── ratelimit.py    # In-memory sliding-window rate limiter per user
+│       ├── scheduler.py    # APScheduler (Asia/Jakarta) untuk digest harian
 │       ├── handlers.py     # Command & callback handler Telegram
 │       └── keyboards.py    # Definisi InlineKeyboard
 ├── tests/
@@ -114,7 +122,9 @@ Kilas/
 │   ├── test_rss.py         # Unit test modul RSS
 │   ├── test_extractor.py   # Unit test modul extractor
 │   ├── test_summarizer.py  # Unit test modul summarizer (3 gaya & auto-discovery)
-│   └── test_db.py          # Unit test SQLite cache & preferensi user
+│   ├── test_db.py          # Unit test SQLite (cache, preferensi user, subscriptions)
+│   ├── test_ratelimit.py   # Unit test rate limiter (sliding window & isolasi user)
+│   └── test_scheduler.py   # Unit test scheduler (parsing waktu, jobs, error handling)
 ├── .env.example            # Template env — salin ke .env
 ├── requirements.txt        # Dependensi terkunci (pin versi)
 ├── .gitignore

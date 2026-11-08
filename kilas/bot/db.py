@@ -50,7 +50,7 @@ def init_db(db_path: str = DATABASE_PATH) -> None:
             """
         )
 
-        # 2. Tabel subscriptions (untuk fitur langganan/jadwal di fase mendatang)
+        # 2. Tabel subscriptions (langganan digest harian per user)
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS subscriptions (
@@ -179,3 +179,92 @@ def set_cached_summary(
         )
         conn.commit()
     logger.info("CACHE STORED: url=%s, style=%s (%d karakter)", cleaned_url, cleaned_style, len(cleaned_summary))
+
+
+# ---------------------------------------------------------------------------
+# Langganan Digest Harian (subscriptions)
+# ---------------------------------------------------------------------------
+
+def get_user_subscription(
+    telegram_id: int, db_path: str = DATABASE_PATH
+) -> Optional[dict]:
+    """
+    Ambil data langganan digest user (telegram_id, genre, send_time).
+    Mengembalikan dict atau None jika belum berlangganan.
+    """
+    with get_db(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT telegram_id, genre, send_time FROM subscriptions WHERE telegram_id = ? LIMIT 1;",
+            (telegram_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "telegram_id": row["telegram_id"],
+                "genre": row["genre"],
+                "send_time": row["send_time"],
+            }
+    return None
+
+
+def set_user_subscription(
+    telegram_id: int,
+    genre: str,
+    send_time: str,
+    db_path: str = DATABASE_PATH,
+) -> None:
+    """
+    Simpan atau perbarui langganan digest harian user.
+    Memastikan user hanya memiliki 1 jadwal aktif.
+    """
+    cleaned_genre = genre.strip()
+    cleaned_time = send_time.strip()
+
+    with get_db(db_path) as conn:
+        cursor = conn.cursor()
+        # Hapus langganan lama user jika ada agar hanya ada 1 jadwal aktif
+        cursor.execute("DELETE FROM subscriptions WHERE telegram_id = ?;", (telegram_id,))
+        cursor.execute(
+            """
+            INSERT INTO subscriptions (telegram_id, genre, send_time)
+            VALUES (?, ?, ?);
+            """,
+            (telegram_id, cleaned_genre, cleaned_time),
+        )
+        conn.commit()
+    logger.info(
+        "User %s berlangganan digest: genre=%s, time=%s",
+        telegram_id, cleaned_genre, cleaned_time
+    )
+
+
+def delete_user_subscription(
+    telegram_id: int, db_path: str = DATABASE_PATH
+) -> None:
+    """
+    Hapus / nonaktifkan langganan digest harian user.
+    """
+    with get_db(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM subscriptions WHERE telegram_id = ?;", (telegram_id,))
+        conn.commit()
+    logger.info("User %s menonaktifkan langganan digest.", telegram_id)
+
+
+def get_all_subscriptions(db_path: str = DATABASE_PATH) -> list[dict]:
+    """
+    Ambil semua daftar langganan aktif dari database untuk dimuat ke scheduler.
+    """
+    with get_db(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT telegram_id, genre, send_time FROM subscriptions;")
+        rows = cursor.fetchall()
+        return [
+            {
+                "telegram_id": row["telegram_id"],
+                "genre": row["genre"],
+                "send_time": row["send_time"],
+            }
+            for row in rows
+        ]

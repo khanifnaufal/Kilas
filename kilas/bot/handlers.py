@@ -1,14 +1,16 @@
 """
 handlers.py — Command dan callback handler untuk bot Kilas.
 
-Handler (Fase 4):
+Handler (Fase 5):
     /start         → sapaan + inline keyboard 5 genre
     /gaya          → pilih preferensi gaya ringkasan (Singkat, Standar, Detail)
+    /digest        → pengaturan langganan digest harian (pilih genre & jam WIB)
     genre_*        → fetch berita terbaru, tampilkan 5 judul sebagai tombol
-    art_<id>       → ringkas berita (cek cache dulu, panggil extractor + LLM jika miss)
+    art_<id>       → ringkas berita (cek rate limit, cache, panggil LLM jika miss)
     chstyle_menu_  → menu ganti gaya ringkasan pada artikel aktif
     chstyle_apply_ → terapkan gaya baru, ringkas ulang artikel & simpan ke cache
     setstyle_      → simpan preferensi gaya global user
+    dig_*          → callbacks alur konfigurasi digest harian
     back_genres    → kembali ke daftar genre
 """
 
@@ -18,21 +20,28 @@ from telegram import Message, Update
 from telegram.ext import ContextTypes
 
 from .db import (
+    delete_user_subscription,
     get_cached_summary,
     get_user_style,
+    get_user_subscription,
     set_cached_summary,
     set_user_style,
+    set_user_subscription,
 )
 from .extractor import extract_article_text
 from .keyboards import (
     GENRE_LABEL,
     STYLE_DISPLAY_NAMES,
+    digest_genre_keyboard,
+    digest_time_keyboard,
     genre_keyboard,
     news_list_keyboard,
     style_keyboard,
     summary_keyboard,
 )
+from .ratelimit import summary_rate_limiter
 from .rss import get_article, get_news_by_genre, store_article
+from .scheduler import remove_user_digest, schedule_user_digest
 from .summarizer import SummarizerError, get_summarizer
 
 logger = logging.getLogger(__name__)
@@ -49,7 +58,6 @@ async def _safe_edit_message(
     2. Jika parsing Markdown gagal, coba plain text.
     3. Jika masih gagal (misal link URL tombol bermasalah), coba plain text tanpa keyboard.
     """
-    # Upaya 1: Markdown
     try:
         await message.edit_text(
             text,
@@ -69,7 +77,6 @@ async def _safe_edit_message(
         .replace("]", "")
     )
 
-    # Upaya 2: Plain text dengan keyboard
     try:
         await message.edit_text(
             clean_text,
@@ -81,7 +88,6 @@ async def _safe_edit_message(
     except Exception as exc2:
         logger.warning("Edit plain text gagal (%s). Coba tanpa reply_markup.", exc2)
 
-    # Upaya 3: Plain text tanpa keyboard
     try:
         await message.edit_text(
             clean_text,
@@ -93,7 +99,7 @@ async def _safe_edit_message(
 
 
 # ---------------------------------------------------------------------------
-# Perintah /start dan /gaya
+# Perintah Utama: /start, /gaya, /digest
 # ---------------------------------------------------------------------------
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -104,7 +110,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         f"Halo, {user.first_name}! 👋\n\n"
         "Selamat datang di *Kilas* — ringkasan berita Indonesia terkini.\n\n"
-        "Pilih genre berita yang ingin kamu baca:",
+        "Perintah yang tersedia:\n"
+        "• /start — Baca berita terkini berdasarkan genre\n"
+        "• /gaya — Atur preferensi gaya ringkasanmu\n"
+        "• /digest — Atur jadwal kirim ringkasan harian otomatis\n\n"
+        "Pilih genre berita yang ingin kamu baca sekarang:",
         parse_mode="Markdown",
         reply_markup=genre_keyboard(),
     )
@@ -131,6 +141,37 @@ async def cmd_gaya(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         text,
         parse_mode="Markdown",
         reply_markup=style_keyboard(current_style=current_style),
+    )
+
+
+async def cmd_digest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/digest — tampilkan menu pengaturan langganan digest harian."""
+    user = update.effective_user
+    sub = get_user_subscription(user.id)
+
+    logger.info("User %s membuka menu /digest", user.id)
+
+    if sub:
+        genre_label = GENRE_LABEL.get(sub["genre"], sub["genre"])
+        text = (
+            "🔔 *Pengaturan Digest Berita Harian*\n\n"
+            "Status saat ini: *Aktif* ✅\n"
+            f"• Genre: *{genre_label}*\n"
+            f"• Jam Kirim: *{sub['send_time']} WIB*\n\n"
+            "Kamu bisa memilih genre lain untuk mengubah jadwal, atau matikan langganan:"
+        )
+    else:
+        text = (
+            "🔔 *Langganan Digest Berita Harian*\n\n"
+            "Status saat ini: *Nonaktif* ⚪\n\n"
+            "Dapatkan ringkasan top 5 berita setiap hari secara otomatis sesuai gaya pilihanmu!\n\n"
+            "Langkah 1: *Pilih genre berita yang ingin kamu terima:*"
+        )
+
+    await update.message.reply_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=digest_genre_keyboard(has_active_sub=bool(sub)),
     )
 
 
@@ -183,13 +224,13 @@ async def cb_back_genres(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 # ---------------------------------------------------------------------------
-# Callback Ringkasan Artikel (dengan Cache & Preferensi Gaya)
+# Callback Ringkasan Artikel (dengan Rate Limiter, Cache & Preferensi Gaya)
 # ---------------------------------------------------------------------------
 
 async def cb_article(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Callback saat pengguna menekan tombol judul artikel.
-    1. Ambil preferensi gaya user dari DB.
+    1. Cek rate limiter (maks 10 req/menit).
     2. Cek cache (url, style). Jika ada, langsung tampilkan (Cache Hit).
     3. Jika tidak ada di cache (Cache Miss), ekstrak artikel & ringkas via LLM.
     4. Simpan hasil ringkasan ke cache.
@@ -197,6 +238,7 @@ async def cb_article(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     query = update.callback_query
     await query.answer()
 
+    user_id = query.from_user.id
     art_id = query.data[4:]  # strip 'art_'
     article = get_article(art_id)
 
@@ -207,13 +249,23 @@ async def cb_article(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
         return
 
-    user_id = query.from_user.id
+    # 1. Cek Rate Limiter
+    if not summary_rate_limiter.is_allowed(user_id):
+        wait_sec = summary_rate_limiter.get_remaining_seconds(user_id)
+        logger.warning("Rate limit terlampaui untuk user %s (tunggu %ds)", user_id, wait_sec)
+        await query.message.reply_text(
+            f"⏳ *Ups, pelan-pelan ya!* Kamu sudah meminta lebih dari 10 ringkasan dalam 1 menit.\n\n"
+            f"Silakan tunggu sekitar *{wait_sec} detik* lagi sebelum membaca artikel berikutnya. 🙏",
+            parse_mode="Markdown",
+        )
+        return
+
     user_style = get_user_style(user_id)
     style_label = STYLE_DISPLAY_NAMES.get(user_style, user_style)
 
     logger.info("User %s membuka artikel id=%s dengan gaya=%s", user_id, art_id, user_style)
 
-    # 1. Cek Cache SQLite
+    # 2. Cek Cache SQLite
     cached_summary = get_cached_summary(article.link, user_style)
     if cached_summary:
         result_text = (
@@ -229,13 +281,12 @@ async def cb_article(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
         return
 
-    # 2. Cache Miss: Kirim pesan status loading
+    # 3. Cache Miss: Kirim status loading
     status_msg = await query.message.reply_text(
         f"⏳ Sedang meringkas ({style_label})…",
         reply_to_message_id=query.message.message_id,
     )
 
-    # Ekstraksi teks artikel
     article_text = await extract_article_text(
         article.link, fallback_desc=article.description
     )
@@ -281,7 +332,7 @@ async def cb_article(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     # Simpan ke cache
     set_cached_summary(article.link, user_style, summary)
 
-    # Tampilkan hasil
+    # Tampilkan hasil ringkasan
     result_text = (
         f"📰 *{article.title}*\n"
         f"🏷️ Sumber: _{article.source}_  •  _{style_label}_\n\n"
@@ -325,10 +376,7 @@ async def cb_set_style(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def cb_chstyle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Callback saat tombol [🎨 Ganti gaya] di pesan ringkasan ditekan (chstyle_menu_<art_id>).
-    Tampilkan tombol 3 pilihan gaya.
-    """
+    """Callback tombol [🎨 Ganti gaya] di pesan ringkasan."""
     query = update.callback_query
     await query.answer()
 
@@ -338,29 +386,16 @@ async def cb_chstyle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     logger.info("User %s membuka menu ganti gaya untuk artikel id=%s", user_id, art_id)
 
-    text = (
-        "🎨 *Pilih Gaya Baru untuk Artikel Ini:*\n\n"
-        "• *⚡ Singkat*: 1 kalimat padat\n"
-        "• *📌 Standar*: 3 poin ringkas\n"
-        "• *📖 Detail*: 1 paragraf pendek komprehensif"
-    )
-
     await query.edit_message_reply_markup(
         reply_markup=style_keyboard(current_style=current_style, art_id=art_id)
     )
 
 
 async def cb_chstyle_apply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Callback saat gaya baru dipilih untuk artikel aktif (chstyle_apply_<style>_<art_id>).
-    1. Simpan preferensi gaya baru user ke DB.
-    2. Cek cache. Jika ada, langsung edit pesan.
-    3. Jika tidak ada di cache, minta LLM meringkas ulang dengan gaya baru & simpan cache.
-    """
+    """Callback saat gaya baru dipilih untuk artikel aktif."""
     query = update.callback_query
     await query.answer()
 
-    # format: "chstyle_apply_<style>_<art_id>"
     parts = query.data.split("_")
     if len(parts) < 4:
         logger.error("Callback data chstyle_apply tidak valid: %s", query.data)
@@ -370,7 +405,16 @@ async def cb_chstyle_apply(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     art_id = parts[3]
     user_id = query.from_user.id
 
-    # Simpan sebagai preferensi user
+    # 1. Cek Rate Limiter
+    if not summary_rate_limiter.is_allowed(user_id):
+        wait_sec = summary_rate_limiter.get_remaining_seconds(user_id)
+        await query.message.reply_text(
+            f"⏳ *Ups, pelan-pelan ya!* Kamu sudah meminta lebih dari 10 ringkasan dalam 1 menit.\n\n"
+            f"Silakan tunggu sekitar *{wait_sec} detik* lagi sebelum meringkas ulang. 🙏",
+            parse_mode="Markdown",
+        )
+        return
+
     set_user_style(user_id, new_style)
     style_label = STYLE_DISPLAY_NAMES.get(new_style, new_style)
 
@@ -381,12 +425,9 @@ async def cb_chstyle_apply(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         return
 
-    logger.info(
-        "User %s menerapkan gaya baru '%s' untuk artikel id=%s",
-        user_id, new_style, art_id,
-    )
+    logger.info("User %s menerapkan gaya baru '%s' untuk artikel id=%s", user_id, new_style, art_id)
 
-    # 1. Cek Cache dulu
+    # Cek Cache dulu
     cached_summary = get_cached_summary(article.link, new_style)
     if cached_summary:
         result_text = (
@@ -401,7 +442,6 @@ async def cb_chstyle_apply(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         return
 
-    # 2. Cache Miss: Update pesan jadi loading
     await query.edit_message_text(f"⏳ Meringkas ulang dengan gaya *{style_label}*…", parse_mode="Markdown")
 
     article_text = await extract_article_text(
@@ -432,7 +472,6 @@ async def cb_chstyle_apply(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         return
 
-    # Simpan ke cache
     set_cached_summary(article.link, new_style, summary)
 
     result_text = (
@@ -445,4 +484,113 @@ async def cb_chstyle_apply(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         query.message,
         result_text,
         reply_markup=summary_keyboard(article.link, art_id=art_id),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Callbacks Alur Pengaturan Digest Harian (Fase 5)
+# ---------------------------------------------------------------------------
+
+async def cb_digest_genre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback setelah user memilih genre untuk digest (dig_genre_<genre>)."""
+    query = update.callback_query
+    await query.answer()
+
+    genre_code = query.data[10:]  # strip 'dig_genre_'
+    genre_label = GENRE_LABEL.get(genre_code, genre_code)
+
+    logger.info("User %s memilih genre digest: %s", query.from_user.id, genre_code)
+
+    text = (
+        f"⏰ *Pilih Jam Pengiriman Digest ({genre_label})*\n\n"
+        "Pilih waktu pengiriman setiap hari (WIB):\n"
+        "Bot akan otomatis mengirimkan top 5 ringkasan berita pilihanmu pada jam ini."
+    )
+
+    await query.edit_message_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=digest_time_keyboard(genre_code),
+    )
+
+
+async def cb_digest_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback setelah user memilih jam pengiriman digest (dig_time_<genre>_<time>)."""
+    query = update.callback_query
+    await query.answer()
+
+    # Format data: 'dig_time_genre_teknologi_07:00'
+    payload = query.data[9:]  # strip 'dig_time_'
+    genre_code, send_time = payload.rsplit("_", 1)
+    user_id = query.from_user.id
+    genre_label = GENRE_LABEL.get(genre_code, genre_code)
+
+    # Simpan ke DB & update scheduler dinamis
+    set_user_subscription(user_id, genre_code, send_time)
+    schedule_user_digest(user_id, send_time)
+
+    logger.info("User %s berhasil berlangganan digest %s jam %s WIB", user_id, genre_code, send_time)
+
+    text = (
+        "🎉 *Langganan Digest Berhasil Diaktifkan!*\n\n"
+        f"• Genre Berita: *{genre_label}*\n"
+        f"• Waktu Pengiriman: *{send_time} WIB* (Setiap Hari)\n\n"
+        "Kamu akan otomatis menerima pesan ringkasan top 5 berita sesuai gaya pilihanmu. "
+        "Gunakan perintah /digest kapan pun untuk mengubah jadwal atau menonaktifkannya."
+    )
+
+    await query.edit_message_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=genre_keyboard(),
+    )
+
+
+async def cb_digest_off(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback untuk mematikan langganan digest harian (dig_off)."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    delete_user_subscription(user_id)
+    remove_user_digest(user_id)
+
+    logger.info("User %s mematikan langganan digest", user_id)
+
+    text = (
+        "🔕 *Digest Harian Dinonaktifkan*\n\n"
+        "Kamu tidak akan lagi menerima ringkasan berita otomatis setiap hari.\n\n"
+        "Ketik /digest kapan saja jika ingin mengaktifkannya kembali!"
+    )
+
+    await query.edit_message_text(text, parse_mode="Markdown")
+
+
+async def cb_digest_back_genre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback kembali ke pemilihan genre digest (dig_back_genre)."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    sub = get_user_subscription(user_id)
+
+    text = (
+        "🔔 *Langganan Digest Berita Harian*\n\n"
+        "Langkah 1: *Pilih genre berita yang ingin kamu terima:*"
+    )
+
+    await query.edit_message_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=digest_genre_keyboard(has_active_sub=bool(sub)),
+    )
+
+
+async def cb_digest_close(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback menutup menu digest (dig_close)."""
+    query = update.callback_query
+    await query.answer()
+
+    await query.edit_message_text(
+        "Pengaturan digest ditutup. Ketik /digest untuk membuka kembali.",
     )

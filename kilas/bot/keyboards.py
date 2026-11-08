@@ -164,3 +164,66 @@ def summary_keyboard(source_url: str, art_id: str = "") -> InlineKeyboardMarkup:
 
     buttons.append(action_row)
     return InlineKeyboardMarkup(buttons)
+
+
+# ---------------------------------------------------------------------------
+# Digest Keyboards (Fase 5)
+# ---------------------------------------------------------------------------
+
+DIGEST_HOURS: list[tuple[str, str]] = [
+    ("🌅 06:00", "06:00"),
+    ("☕ 07:00", "07:00"),
+    ("☀️ 08:00", "08:00"),
+    ("🥪 12:00", "12:00"),
+    ("🌇 18:00", "18:00"),
+    ("🌙 20:00", "20:00"),
+]
+
+
+def digest_genre_keyboard(has_active_sub: bool = False) -> InlineKeyboardMarkup:
+    """
+    Keyboard pemilihan genre untuk langganan digest harian.
+    Menyediakan tombol opsi matikan digest jika user sudah berlangganan.
+    """
+    buttons = [
+        [InlineKeyboardButton(text=label, callback_data=f"dig_genre_{code}")]
+        for label, code in GENRES
+    ]
+
+    action_row = []
+    if has_active_sub:
+        action_row.append(
+            InlineKeyboardButton(text="🔕 Matikan Digest", callback_data="dig_off")
+        )
+    action_row.append(
+        InlineKeyboardButton(text="❌ Tutup", callback_data="dig_close")
+    )
+
+    buttons.append(action_row)
+    return InlineKeyboardMarkup(buttons)
+
+
+def digest_time_keyboard(genre_code: str) -> InlineKeyboardMarkup:
+    """
+    Keyboard pemilihan jam pengiriman digest harian (WIB).
+    Opsi jam: 06:00, 07:00, 08:00, 12:00, 18:00, 20:00.
+    """
+    buttons = [
+        [
+            InlineKeyboardButton(
+                text=label, callback_data=f"dig_time_{genre_code}_{time_val}"
+            )
+            for label, time_val in DIGEST_HOURS[:3]
+        ],
+        [
+            InlineKeyboardButton(
+                text=label, callback_data=f"dig_time_{genre_code}_{time_val}"
+            )
+            for label, time_val in DIGEST_HOURS[3:]
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Ganti Genre", callback_data="dig_back_genre"),
+            InlineKeyboardButton(text="❌ Batal", callback_data="dig_close"),
+        ],
+    ]
+    return InlineKeyboardMarkup(buttons)
