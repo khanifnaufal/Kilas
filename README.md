@@ -65,11 +65,17 @@ python -m unittest discover tests -v
 python -m kilas.bot.main
 ```
 
-Output normal:
-```
-2026-11-07 10:00:00 | INFO     | kilas.bot.main — 🚀 Kilas Bot sedang dimulai...
-2026-11-07 10:00:01 | INFO     | kilas.bot.main — ✅ Bot siap. Tekan Ctrl+C untuk berhenti.
-```
+---
+
+## 💡 Fitur Utama
+
+- **/start**: Pilih dari 5 genre berita terpopuler (Teknologi, Ekonomi, Olahraga, Politik, Hiburan).
+- **/gaya**: Pilih preferensi gaya ringkasan kamu:
+  - **⚡ Singkat**: 1 kalimat padat dan informatif.
+  - **📌 Standar**: 3 poin penting (default).
+  - **📖 Detail**: 1 paragraf pendek komprehensif.
+- **🎨 Ganti Gaya Interaktif**: Tombol `[🎨 Ganti gaya]` langsung pada pesan berita untuk meringkas ulang artikel dengan gaya lain.
+- **⚡ SQLite Caching**: Ringkasan yang sudah pernah di-generate disimpan ke SQLite. Artikel dan gaya yang sama langsung dimuat instan tanpa memanggil ulang LLM.
 
 ---
 
@@ -80,7 +86,8 @@ Output normal:
 | `TELEGRAM_TOKEN` | ✅ | — | Token bot Telegram dari @BotFather |
 | `LLM_PROVIDER` | — | `groq` | Provider AI: `groq`, `gemini`, `claude` |
 | `LLM_API_KEY` | ✅ | — | API key untuk provider yang dipilih |
-| `GROQ_MODEL` | — | `llama-3.1-8b-instant` | Model Groq |
+| `DATABASE_PATH` | — | `kilas.db` | File database SQLite lokal |
+| `GROQ_MODEL` | — | `llama-3.1-8b-instant` | Model Groq (auto-fallback aktif) |
 | `GEMINI_MODEL` | — | `gemini-1.5-flash` | Model Gemini |
 | `CLAUDE_MODEL` | — | `claude-3-haiku-20240307` | Model Claude |
 | `LLM_TIMEOUT` | — | `30` | Batas waktu respon LLM (detik) |
@@ -93,39 +100,26 @@ Output normal:
 Kilas/
 ├── kilas/
 │   └── bot/
-│       ├── main.py         # Entry point — jalankan bot
+│       ├── main.py         # Entry point — inisialisasi DB & jalankan bot
 │       ├── config.py       # Load & validasi .env
+│       ├── db.py           # SQLite: users, subscriptions, summaries_cache
 │       ├── feeds.py        # Mapping sumber RSS per genre
 │       ├── rss.py          # Fetch & parse feed RSS secara async
 │       ├── extractor.py    # Ekstraksi full-text artikel via trafilatura
-│       ├── summarizer.py   # Abstraksi LLM summarizer (Groq/Gemini/Claude)
+│       ├── summarizer.py   # LLM summarizer (3 gaya: Singkat, Standar, Detail)
 │       ├── handlers.py     # Command & callback handler Telegram
 │       └── keyboards.py    # Definisi InlineKeyboard
 ├── tests/
 │   ├── fixtures/           # Fixture data feed XML untuk unit test
 │   ├── test_rss.py         # Unit test modul RSS
 │   ├── test_extractor.py   # Unit test modul extractor
-│   └── test_summarizer.py  # Unit test modul summarizer
+│   ├── test_summarizer.py  # Unit test modul summarizer (3 gaya & auto-discovery)
+│   └── test_db.py          # Unit test SQLite cache & preferensi user
 ├── .env.example            # Template env — salin ke .env
 ├── requirements.txt        # Dependensi terkunci (pin versi)
 ├── .gitignore
 └── README.md
 ```
-
----
-
-## 🛠️ Stack
-
-| Library | Versi | Kegunaan |
-|---------|-------|---------|
-| `python-telegram-bot` | 21.6 | Framework bot Telegram async |
-| `feedparser` | 6.0.11 | Parsing RSS feed |
-| `trafilatura` | 1.12.1 | Ekstraksi teks artikel web bersih |
-| `groq` | 0.9.0 | Client Groq API (default LLM) |
-| `google-generativeai` | 0.7.2 | Client Google Gemini API |
-| `anthropic` | 0.34.2 | Client Anthropic Claude API |
-| `python-dotenv` | 1.0.1 | Load konfigurasi dari `.env` |
-| `pytest` | 8.3.3 | Pengujian otomatis / unit test |
 
 ---
 

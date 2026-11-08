@@ -80,30 +80,87 @@ def news_list_keyboard(
 
 
 # ---------------------------------------------------------------------------
-# Summary keyboard (Fase 3)
+# Style Selection Keyboard (Fase 4)
 # ---------------------------------------------------------------------------
 
-def summary_keyboard(source_url: str) -> InlineKeyboardMarkup:
+STYLES_INFO: list[tuple[str, str, str]] = [
+    ("singkat", "⚡ Singkat", "1 kalimat"),
+    ("standar", "📌 Standar", "3 poin"),
+    ("detail",  "📖 Detail",  "1 paragraf"),
+]
+
+STYLE_DISPLAY_NAMES: dict[str, str] = {
+    "singkat": "⚡ Singkat (1 Kalimat)",
+    "standar": "📌 Standar (3 Poin)",
+    "detail":  "📖 Detail (1 Paragraf)",
+}
+
+
+def style_keyboard(
+    current_style: str = "standar", art_id: str | None = None
+) -> InlineKeyboardMarkup:
+    """
+    Keyboard pilihan 3 gaya ringkasan.
+
+    Args:
+        current_style: Gaya yang sedang aktif (diberi tanda centang ✓).
+        art_id: Jika diklik dari pesan ringkasan, sertakan art_id untuk re-summarize.
+    """
+    buttons = []
+    for code, label, hint in STYLES_INFO:
+        mark = " ✓" if code == current_style else ""
+        text = f"{label} ({hint}){mark}"
+
+        if art_id:
+            cb_data = f"chstyle_apply_{code}_{art_id}"
+        else:
+            cb_data = f"setstyle_{code}"
+
+        buttons.append([InlineKeyboardButton(text=text, callback_data=cb_data)])
+
+    if art_id:
+        buttons.append(
+            [InlineKeyboardButton(text="🔙 Batal", callback_data=f"art_{art_id}")]
+        )
+
+    return InlineKeyboardMarkup(buttons)
+
+
+# ---------------------------------------------------------------------------
+# Summary keyboard (Fase 3 & 4)
+# ---------------------------------------------------------------------------
+
+def summary_keyboard(source_url: str, art_id: str = "") -> InlineKeyboardMarkup:
     """
     Keyboard pada pesan hasil ringkasan:
     - Tombol URL [📖 Baca sumber]
-    - Tombol Callback [🔙 Kembali] untuk kembali memilih genre
+    - Tombol [🎨 Ganti gaya] (Fase 4)
+    - Tombol [🔙 Kembali] ke daftar genre
     """
-    action_row: list[InlineKeyboardButton] = []
+    buttons = []
 
+    # Row 1: Tombol URL baca sumber
     cleaned_url = (source_url or "").strip()
     if cleaned_url.startswith(("http://", "https://")):
-        # Bersihkan spasi atau karakter kontrol yang merusak URL Telegram
         safe_url = cleaned_url.split()[0]
         try:
-            action_row.append(
-                InlineKeyboardButton(text="📖 Baca sumber", url=safe_url)
+            buttons.append(
+                [InlineKeyboardButton(text="📖 Baca sumber", url=safe_url)]
             )
         except Exception as exc:
             logger.warning("URL '%s' tidak valid untuk tombol Telegram: %s", safe_url, exc)
 
+    # Row 2: Tombol Ganti Gaya & Kembali
+    action_row = []
+    if art_id:
+        action_row.append(
+            InlineKeyboardButton(
+                text="🎨 Ganti gaya", callback_data=f"chstyle_menu_{art_id}"
+            )
+        )
     action_row.append(
         InlineKeyboardButton(text="🔙 Kembali", callback_data="back_genres")
     )
 
-    return InlineKeyboardMarkup([action_row])
+    buttons.append(action_row)
+    return InlineKeyboardMarkup(buttons)

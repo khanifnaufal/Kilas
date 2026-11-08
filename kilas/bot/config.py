@@ -48,6 +48,9 @@ GROQ_MODEL: str = _optional("GROQ_MODEL", "llama-3.1-8b-instant")
 GEMINI_MODEL: str = _optional("GEMINI_MODEL", "gemini-1.5-flash")
 CLAUDE_MODEL: str = _optional("CLAUDE_MODEL", "claude-3-haiku-20240307")
 
+# Database SQLite
+DATABASE_PATH: str = _optional("DATABASE_PATH", "kilas.db")
+
 # Timeout LLM call (detik)
 try:
     LLM_TIMEOUT: float = float(_optional("LLM_TIMEOUT", "30"))
@@ -63,7 +66,7 @@ if LLM_PROVIDER not in _VALID_PROVIDERS:
     )
 
 logger.debug(
-    "Config dimuat — provider: %s, token: %s…",
+    "Config dimuat — provider: %s, db: %s",
     LLM_PROVIDER,
-    TELEGRAM_TOKEN[:8],
+    DATABASE_PATH,
 )

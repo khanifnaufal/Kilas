@@ -2,7 +2,7 @@
 tests/test_summarizer.py — Unit test untuk kilas.bot.summarizer
 
 Menguji abstraksi LLM summarizer dengan mock provider:
-- Validasi prompt standar (Bahasa Indonesia, 3 poin, anti-halusinasi, 80 kata).
+- Validasi 3 prompt gaya: Singkat (1 kalimat), Standar (3 poin), Detail (1 paragraf).
 - Pemotongan panjang input aman.
 - GroqSummarizer, GeminiSummarizer, ClaudeSummarizer (sukses & error handling).
 - Auto-discovery model Groq saat terjadi error 404 / model_not_found.
@@ -15,7 +15,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from kilas.bot.summarizer import (
     MAX_LLM_INPUT_CHARS,
-    STANDARD_SUMMARY_PROMPT,
+    PROMPT_DETAIL,
+    PROMPT_SINGKAT,
+    PROMPT_STANDAR,
     ClaudeSummarizer,
     GeminiSummarizer,
     GroqSummarizer,
@@ -30,22 +32,45 @@ def _run(coro):
 
 
 class TestPromptPreparation(unittest.TestCase):
-    def test_prompt_rules_included(self):
-        """Pastikan instruksi wajib ada dalam konstanta prompt."""
-        prompt = STANDARD_SUMMARY_PROMPT.lower()
-        self.assertIn("3 poin", prompt)
+    def test_prompt_rules_singkat(self):
+        """Prompt Singkat harus mewajibkan 1 kalimat padat."""
+        prompt = PROMPT_SINGKAT.lower()
+        self.assertIn("1 (satu) kalimat", prompt)
         self.assertIn("bahasa indonesia", prompt)
         self.assertIn("fakta", prompt)
+
+    def test_prompt_rules_standar(self):
+        """Prompt Standar harus mewajibkan 3 poin ringkas."""
+        prompt = PROMPT_STANDAR.lower()
+        self.assertIn("3 (tiga) poin", prompt)
+        self.assertIn("bahasa indonesia", prompt)
         self.assertIn("80 kata", prompt)
         self.assertIn("bullet", prompt)
+
+    def test_prompt_rules_detail(self):
+        """Prompt Detail harus mewajibkan 1 paragraf pendek komprehensif."""
+        prompt = PROMPT_DETAIL.lower()
+        self.assertIn("1 (satu) paragraf", prompt)
+        self.assertIn("bahasa indonesia", prompt)
+        self.assertIn("120 kata", prompt)
 
     def test_prepare_prompt_formats_correctly(self):
         """prepare_prompt menyisipkan judul dan teks dengan benar."""
         title = "Inovasi Baru AI di Indonesia"
         text = "Kementerian Kominfo meresmikan program akselerasi AI nasional."
-        formatted = prepare_prompt(title, text)
+        formatted = prepare_prompt(title, text, style="standar")
         self.assertIn(title, formatted)
         self.assertIn(text, formatted)
+
+    def test_prepare_prompt_selects_style(self):
+        """prepare_prompt memilih template sesuai style yang diminta."""
+        title = "Judul"
+        text = "Isi"
+        prompt_s = prepare_prompt(title, text, style="singkat")
+        self.assertIn("1 (satu) kalimat", prompt_s.lower())
+
+        prompt_d = prepare_prompt(title, text, style="detail")
+        self.assertIn("1 (satu) paragraf", prompt_d.lower())
 
     def test_prepare_prompt_truncates_oversized_text(self):
         """Teks yang terlalu panjang dipotong ke MAX_LLM_INPUT_CHARS."""
@@ -79,7 +104,9 @@ class TestGroqSummarizer(unittest.TestCase):
 
         with patch("groq.AsyncGroq", return_value=mock_client):
             result = _run(
-                summarizer.summarize("Judul", "Isi teks berita yang memadai.")
+                summarizer.summarize(
+                    "Judul", "Isi teks berita yang memadai.", style="standar"
+                )
             )
 
         self.assertIn("• Poin satu.", result)
@@ -100,7 +127,6 @@ class TestGroqSummarizer(unittest.TestCase):
         """Jika model default 404, summarizer mengambil daftar model aktif dan mencoba ulang."""
         summarizer = GroqSummarizer(api_key="mock_key", model="deprecated-model")
 
-        # Mock models.list()
         mock_model_item = MagicMock()
         mock_model_item.id = "llama-active-preview"
         mock_page = MagicMock()
@@ -114,7 +140,6 @@ class TestGroqSummarizer(unittest.TestCase):
         mock_client = MagicMock()
         mock_client.models.list = AsyncMock(return_value=mock_page)
 
-        # Pertama kali panggil error 404 model_not_found, panggilan kedua sukses
         mock_client.chat.completions.create = AsyncMock(
             side_effect=[
                 Exception("Error 404: model_not_found"),
@@ -148,7 +173,9 @@ class TestGeminiSummarizer(unittest.TestCase):
         with patch("google.generativeai.configure"):
             with patch("google.generativeai.GenerativeModel", return_value=mock_model):
                 result = _run(
-                    summarizer.summarize("Judul", "Isi artikel ekonomi.")
+                    summarizer.summarize(
+                        "Judul", "Isi artikel ekonomi.", style="standar"
+                    )
                 )
 
         self.assertIn("• Ringkasan satu.", result)
@@ -179,7 +206,11 @@ class TestClaudeSummarizer(unittest.TestCase):
         mock_client.messages.create = AsyncMock(return_value=fake_response)
 
         with patch("anthropic.AsyncAnthropic", return_value=mock_client):
-            result = _run(summarizer.summarize("Judul", "Isi berita hiburan."))
+            result = _run(
+                summarizer.summarize(
+                    "Judul", "Isi berita hiburan.", style="standar"
+                )
+            )
 
         self.assertIn("• Poin A.", result)
 

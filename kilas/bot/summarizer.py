@@ -1,9 +1,12 @@
 """
 summarizer.py — Abstraksi LLM summarizer untuk bot Kilas.
 
-Mendukung berbagai provider (Groq, Gemini, Claude) dengan interface seragam.
-Gaya ringkasan: "Standar" (3 poin ringkas, Bahasa Indonesia, anti-halusinasi,
-maksimal sekitar 80 kata).
+Mendukung 3 gaya ringkasan:
+- "Singkat": 1 kalimat padat dan informatif.
+- "Standar": 3 poin ringkas (bullet •).
+- "Detail": 1 paragraf pendek komprehensif.
+
+Mendukung berbagai provider (Groq, Gemini, Claude) dengan auto-discovery.
 """
 
 import asyncio
@@ -25,12 +28,27 @@ logger = logging.getLogger(__name__)
 MAX_LLM_INPUT_CHARS = 3500
 
 # ---------------------------------------------------------------------------
-# Template Prompt Gaya Standar
+# Konstanta Prompt per Gaya Ringkasan
 # ---------------------------------------------------------------------------
-STANDARD_SUMMARY_PROMPT = """Tugasmu adalah membuat ringkasan berita dalam gaya Standar untuk bot berita Telegram 'Kilas'.
+
+PROMPT_SINGKAT = """Tugasmu adalah membuat ringkasan berita dalam gaya SINGKAT untuk bot berita Telegram 'Kilas'.
 
 Aturan ketat yang WAJIB dipatuhi:
-1. Tulis ringkasan tepat dalam 3 poin ringkas (gunakan simbol bullet • di awal setiap poin).
+1. Tulis ringkasan tepat dalam 1 (satu) kalimat padat, jelas, dan informatif yang mencakup inti utama berita.
+2. Gunakan Bahasa Indonesia yang baik dan lugas.
+3. Hanya gunakan fakta yang terdapat dalam teks artikel yang diberikan. Jangan mengarang atau menambahkan fakta dari luar (anti-halusinasi).
+4. Parafrase dengan kalimatmu sendiri, jangan menyalin kalimat mentah-mentah dari artikel.
+5. Jangan sertakan judul, salam pembuka, atau komentar penutup. Langsung tampilkan kalimat ringkasan tersebut.
+
+Judul Artikel: {title}
+Isi Artikel:
+{text}
+"""
+
+PROMPT_STANDAR = """Tugasmu adalah membuat ringkasan berita dalam gaya STANDAR untuk bot berita Telegram 'Kilas'.
+
+Aturan ketat yang WAJIB dipatuhi:
+1. Tulis ringkasan tepat dalam 3 (tiga) poin ringkas (gunakan simbol bullet • di awal setiap poin).
 2. Gunakan Bahasa Indonesia yang baik, lugas, dan mudah dipahami.
 3. Hanya gunakan fakta yang terdapat dalam isi artikel yang diberikan. Jangan pernah mengarang atau menambahkan fakta dari luar (anti-halusinasi).
 4. Parafrase dengan kalimatmu sendiri, jangan menyalin kalimat mentah-mentah dari artikel.
@@ -42,19 +60,44 @@ Isi Artikel:
 {text}
 """
 
+PROMPT_DETAIL = """Tugasmu adalah membuat ringkasan berita dalam gaya DETAIL untuk bot berita Telegram 'Kilas'.
+
+Aturan ketat yang WAJIB dipatuhi:
+1. Tulis ringkasan dalam 1 (satu) paragraf pendek komprehensif (sekitar 3 hingga 5 kalimat) yang mencakup konteks, peristiwa utama, dan dampaknya.
+2. Gunakan Bahasa Indonesia yang baik, mengalir, dan informatif.
+3. Hanya gunakan fakta yang terdapat dalam isi artikel yang diberikan. Jangan pernah mengarang atau menambahkan fakta dari luar (anti-halusinasi).
+4. Parafrase dengan kalimatmu sendiri, jangan menyalin kalimat mentah-mentah dari artikel.
+5. Panjang total ringkasan maksimal sekitar 120 kata.
+6. Jangan sertakan judul, salam pembuka, atau komentar penutup. Langsung tampilkan satu paragraf ringkasan tersebut.
+
+Judul Artikel: {title}
+Isi Artikel:
+{text}
+"""
+
+STYLE_PROMPTS: dict[str, str] = {
+    "singkat": PROMPT_SINGKAT,
+    "standar": PROMPT_STANDAR,
+    "detail": PROMPT_DETAIL,
+}
+
 
 class SummarizerError(Exception):
     """Exception umum saat terjadi kegagalan pada proses summarizer."""
     pass
 
 
-def prepare_prompt(title: str, text: str) -> str:
-    """Bersihkan, potong teks ke batas aman, dan susun prompt standar."""
+def prepare_prompt(title: str, text: str, style: str = "standar") -> str:
+    """Bersihkan, potong teks ke batas aman, dan susun prompt sesuai gaya terpilih."""
     cleaned_title = (title or "").strip()
     cleaned_text = (text or "").strip()
+    cleaned_style = (style or "standar").lower().strip()
+
     if len(cleaned_text) > MAX_LLM_INPUT_CHARS:
         cleaned_text = cleaned_text[:MAX_LLM_INPUT_CHARS] + "…"
-    return STANDARD_SUMMARY_PROMPT.format(title=cleaned_title, text=cleaned_text)
+
+    template = STYLE_PROMPTS.get(cleaned_style, PROMPT_STANDAR)
+    return template.format(title=cleaned_title, text=cleaned_text)
 
 
 # ---------------------------------------------------------------------------
@@ -64,16 +107,19 @@ class BaseSummarizer(ABC):
     """Kelas dasar abstrak untuk semua provider LLM summarizer."""
 
     @abstractmethod
-    async def summarize(self, title: str, text: str) -> str:
+    async def summarize(
+        self, title: str, text: str, style: str = "standar"
+    ) -> str:
         """
-        Hasilkan ringkasan 3 poin dari judul dan isi artikel.
+        Hasilkan ringkasan berita sesuai gaya yang dipilih.
 
         Args:
             title: Judul artikel.
             text: Isi teks artikel.
+            style: 'singkat' | 'standar' | 'detail' (default: 'standar').
 
         Returns:
-            Teks ringkasan 3 poin.
+            Teks hasil ringkasan.
 
         Raises:
             SummarizerError: Jika API error, timeout, atau teks kosong.
@@ -97,16 +143,18 @@ class GroqSummarizer(BaseSummarizer):
         self.model = model
         self.timeout = timeout
 
-    async def summarize(self, title: str, text: str) -> str:
+    async def summarize(
+        self, title: str, text: str, style: str = "standar"
+    ) -> str:
         if not text or not text.strip():
             raise SummarizerError("Teks artikel kosong atau tidak tersedia.")
 
-        prompt = prepare_prompt(title, text)
+        prompt = prepare_prompt(title, text, style=style)
         from groq import AsyncGroq
 
         client = AsyncGroq(api_key=self.api_key, timeout=self.timeout)
 
-        # 1. Coba request dengan model utama
+        # 1. Coba request dengan model yang dikonfigurasi
         try:
             response = await client.chat.completions.create(
                 model=self.model,
@@ -120,7 +168,7 @@ class GroqSummarizer(BaseSummarizer):
             err_str = str(exc).lower()
             logger.warning("Request ke model Groq '%s' gagal: %s", self.model, exc)
 
-            # Jika error 404 / model tidak ditemukan, lakukan auto-discovery model aktif dari akun
+            # Jika model 404 / tidak ditemukan, lakukan auto-discovery model aktif dari akun
             if "not_found" in err_str or "does not exist" in err_str or "404" in err_str or "model_not_found" in err_str:
                 logger.info("🔍 Mengambil daftar model aktif yang tersedia di akun Groq kamu...")
                 try:
@@ -128,9 +176,8 @@ class GroqSummarizer(BaseSummarizer):
                     available_ids = [m.id for m in models_page.data]
                     logger.info("📋 Daftar model aktif di akun Groq kamu: %s", available_ids)
 
-                    # Cari model text-generation yang cocok (hindari whisper, guard, dsb.)
+                    # Cari model text generation terbaik (bukan audio / guard)
                     candidate = None
-                    # Prioritas 1: Llama model
                     for mid in available_ids:
                         low = mid.lower()
                         if "whisper" in low or "guard" in low:
@@ -139,7 +186,6 @@ class GroqSummarizer(BaseSummarizer):
                             candidate = mid
                             break
 
-                    # Prioritas 2: Qwen, Gemma, Mixtral, Deepseek
                     if not candidate:
                         for mid in available_ids:
                             low = mid.lower()
@@ -149,7 +195,6 @@ class GroqSummarizer(BaseSummarizer):
                                 candidate = mid
                                 break
 
-                    # Prioritas 3: Model apapun yang bukan audio/guard
                     if not candidate:
                         for mid in available_ids:
                             low = mid.lower()
@@ -159,7 +204,7 @@ class GroqSummarizer(BaseSummarizer):
 
                     if candidate:
                         logger.info("🚀 Otomatis beralih ke model Groq aktif: '%s'", candidate)
-                        self.model = candidate  # simpan untuk request selanjutnya
+                        self.model = candidate
                         fb_resp = await client.chat.completions.create(
                             model=candidate,
                             messages=[{"role": "user", "content": prompt}],
@@ -192,11 +237,13 @@ class GeminiSummarizer(BaseSummarizer):
         self.model = model
         self.timeout = timeout
 
-    async def summarize(self, title: str, text: str) -> str:
+    async def summarize(
+        self, title: str, text: str, style: str = "standar"
+    ) -> str:
         if not text or not text.strip():
             raise SummarizerError("Teks artikel kosong atau tidak tersedia.")
 
-        prompt = prepare_prompt(title, text)
+        prompt = prepare_prompt(title, text, style=style)
         try:
             import google.generativeai as genai
 
@@ -233,22 +280,24 @@ class ClaudeSummarizer(BaseSummarizer):
         self.model = model
         self.timeout = timeout
 
-    async def summarize(self, title: str, text: str) -> str:
+    async def summarize(
+        self, title: str, text: str, style: str = "standar"
+    ) -> str:
         if not text or not text.strip():
             raise SummarizerError("Teks artikel kosong atau tidak tersedia.")
 
-        prompt = prepare_prompt(title, text)
+        prompt = prepare_prompt(title, text, style=style)
         try:
             from anthropic import AsyncAnthropic
 
             client = AsyncAnthropic(api_key=self.api_key, timeout=self.timeout)
-            message = await client.messages.create(
+            response = await client.messages.create(
                 model=self.model,
-                max_tokens=350,
+                max_tokens=400,
                 temperature=0.2,
                 messages=[{"role": "user", "content": prompt}],
             )
-            content = message.content[0].text if message.content else ""
+            content = response.content[0].text if response.content else ""
             if not content or not content.strip():
                 raise SummarizerError("Respon dari Claude kosong.")
             return content.strip()
@@ -266,13 +315,6 @@ def get_summarizer(
 ) -> BaseSummarizer:
     """
     Buat instance summarizer berdasarkan konfigurasi atau argumen.
-
-    Args:
-        provider: 'groq' | 'gemini' | 'claude' (default dari LLM_PROVIDER).
-        api_key: API key provider (default dari LLM_API_KEY).
-
-    Returns:
-        Instance BaseSummarizer sesuai provider.
     """
     selected_provider = (provider or LLM_PROVIDER).lower().strip().strip("'\"")
     selected_api_key = api_key if api_key is not None else LLM_API_KEY

@@ -11,7 +11,17 @@ from telegram import Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler
 
 from .config import TELEGRAM_TOKEN
-from .handlers import cb_article, cb_back_genres, cb_genre, cmd_start
+from .db import init_db
+from .handlers import (
+    cb_article,
+    cb_back_genres,
+    cb_chstyle_apply,
+    cb_chstyle_menu,
+    cb_genre,
+    cb_set_style,
+    cmd_gaya,
+    cmd_start,
+)
 
 
 def _setup_logging() -> None:
@@ -27,23 +37,32 @@ def _setup_logging() -> None:
 
 
 def main() -> None:
-    """Inisialisasi dan jalankan bot dalam mode polling."""
+    """Inisialisasi database dan jalankan bot dalam mode polling."""
     _setup_logging()
     logger = logging.getLogger(__name__)
 
     logger.info("🚀 Kilas Bot sedang dimulai...")
 
+    # 1. Inisialisasi Database SQLite
+    init_db()
+
+    # 2. Bangun Aplikasi Telegram
     app = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
         .build()
     )
 
-    # --- Daftarkan handler ---
+    # 3. Daftarkan Handler Perintah
     app.add_handler(CommandHandler("start", cmd_start))
-    # Urutan pattern callback
+    app.add_handler(CommandHandler("gaya", cmd_gaya))
+
+    # 4. Daftarkan Callback Query Handlers (urutan pattern spesifik ke umum)
     app.add_handler(CallbackQueryHandler(cb_genre, pattern=r"^genre_"))
     app.add_handler(CallbackQueryHandler(cb_article, pattern=r"^art_"))
+    app.add_handler(CallbackQueryHandler(cb_set_style, pattern=r"^setstyle_"))
+    app.add_handler(CallbackQueryHandler(cb_chstyle_menu, pattern=r"^chstyle_menu_"))
+    app.add_handler(CallbackQueryHandler(cb_chstyle_apply, pattern=r"^chstyle_apply_"))
     app.add_handler(CallbackQueryHandler(cb_back_genres, pattern=r"^back_genres$"))
 
     logger.info("✅ Bot siap. Tekan Ctrl+C untuk berhenti.")
