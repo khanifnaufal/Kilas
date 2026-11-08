@@ -15,7 +15,7 @@ from telegram.ext import (
     ContextTypes,
 )
 
-from .config import TELEGRAM_TOKEN
+from .config import LOG_LEVEL, TELEGRAM_TOKEN
 from .db import init_db
 from .handlers import (
     cb_article,
@@ -43,7 +43,7 @@ def _setup_logging() -> None:
     logging.basicConfig(
         format="%(asctime)s | %(levelname)-8s | %(name)s — %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-        level=logging.INFO,
+        level=getattr(logging, LOG_LEVEL, logging.INFO),
     )
     # Kurangi log noise dari library pihak ketiga
     logging.getLogger("httpx").setLevel(logging.WARNING)

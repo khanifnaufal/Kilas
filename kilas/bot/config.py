@@ -51,6 +51,12 @@ CLAUDE_MODEL: str = _optional("CLAUDE_MODEL", "claude-3-haiku-20240307")
 # Database SQLite
 DATABASE_PATH: str = _optional("DATABASE_PATH", "kilas.db")
 
+# Level logging untuk production / development (default: INFO)
+LOG_LEVEL: str = _optional("LOG_LEVEL", "INFO").upper()
+_VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+if LOG_LEVEL not in _VALID_LOG_LEVELS:
+    LOG_LEVEL = "INFO"
+
 # Timeout LLM call (detik)
 try:
     LLM_TIMEOUT: float = float(_optional("LLM_TIMEOUT", "30"))
